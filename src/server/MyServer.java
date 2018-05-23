@@ -21,7 +21,7 @@ public class MyServer implements Server {
 	private void startServer(ClientHandler clientHandler) throws IOException {
 		ServerSocket theServer = new ServerSocket(port);
 		theServer.setSoTimeout(7000);
-
+		//adir
 		while (isRunning()) {
 			try {
 				// System.out.println("Waiting for a client on port: " + port);
