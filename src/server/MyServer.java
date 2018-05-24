@@ -1,65 +1,81 @@
 package server;
 
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
+import java.util.Comparator;
+import java.util.PriorityQueue;
+import java.util.Queue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import clienthandler.ClientHandler;
+import clienthandler.PipeGameClientHandler;
 
 public class MyServer implements Server {
 
 	private int port;
 	private volatile boolean stop;
-
+	volatile Queue<Socket> socketList;
 	public MyServer(int port) {
 
 		this.port = port;
 		stop = false;
 	}
 
-	private void startServer(ClientHandler clientHandler) throws IOException {
+	private void startServer() throws IOException {
+		int numOfThreads = 5;
+		ExecutorService es = Executors.newFixedThreadPool(numOfThreads);
 		ServerSocket theServer = new ServerSocket(port);
 		theServer.setSoTimeout(7000);
+		socketList = new PriorityQueue<>(new PipeGameSocketComparator());
 
-		while (isRunning()) {
-			try {
-				// System.out.println("Waiting for a client on port: " + port);
-				Socket aClient = theServer.accept();
-				// System.out.println(aClient.getInetAddress() + " Connected");
-				clientHandler.handleClient(aClient.getInputStream(), aClient.getOutputStream());
-				aClient.close();
-				// System.out.println(aClient.getInetAddress()+" Connection closed");
+		new Thread(() -> {
+			while (isRunning()) {
+				try {
+					// Waiting for a client
+					Socket aClient = theServer.accept();
+					socketList.add(aClient);
 
-				//break; // not threaded server yet
-			} catch (SocketTimeoutException e) {
-				// System.out.println(e.getMessage() + " ~~SocketTimeoutException");
-			} catch (IOException e) {
-				// System.out.println(e.getMessage() + " ~~IOException");
-			}
-		}
+				} catch (IOException e) {
+					// e.printStackTrace();
+				}
+
+			}}).start();
+
+		while (isRunning() || !socketList.isEmpty()) {
+			while (!socketList.isEmpty()) {
+				Socket aClient = socketList.poll();
+				es.submit(new Runnable() {
+					@Override
+					public void run() {
+						try {
+							ClientHandler ch = new PipeGameClientHandler();
+							ch.handleClient(aClient.getInputStream(), aClient.getOutputStream());
+							aClient.close();
+						} catch (IOException e) {
+							e.printStackTrace();
+						}}});}}
+
 		theServer.close();
 		stopServer();
+		es.shutdown();
+		System.exit(0);
 	}
+
 
 	@Override
 	public void runServer(ClientHandler clientHandler) {
 		new Thread(() -> {
 			try {
-				startServer(clientHandler);
+				startServer();
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				// e.printStackTrace();
 			}
 		}).start();
-
-		// try {
-		// startServer(clientHandler);
-		// } catch (IOException e) {
-		// // TODO Auto-generated catch block
-		// e.printStackTrace();
-		// }
 	}
+
 
 	@Override
 	public void stopServer() {
@@ -72,6 +88,18 @@ public class MyServer implements Server {
 
 	public void setRunning(boolean stop) {
 		this.stop = !stop;
+	}
+
+	private class PipeGameSocketComparator implements Comparator<Socket> {
+		@Override
+		public int compare(Socket s1, Socket s2) {
+			try {
+				return s1.getInputStream().available() - s2.getInputStream().available();
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
+			return 0;
+		}
 	}
 
 }
