@@ -1,65 +1,87 @@
 package server;
 
-import java.io.IOException;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.net.SocketTimeoutException;
+import java.util.Comparator;
+import java.util.PriorityQueue;
+import java.util.Queue;
+import java.util.concurrent.*;
 
 import clienthandler.ClientHandler;
+import clienthandler.PipeGameClientHandler;
+import test.Run;
 
 public class MyServer implements Server {
 
 	private int port;
 	private volatile boolean stop;
-
+	volatile BlockingQueue<Runnable> blockingQueue;
 	public MyServer(int port) {
 
 		this.port = port;
 		stop = false;
 	}
-
-	private void startServer(ClientHandler clientHandler) throws IOException {
+	private void startServer() throws IOException {
+		blockingQueue = new PriorityBlockingQueue<Runnable>();
+		PriorityThreadPool threadPoolExecutor = new PriorityThreadPool(1,3,10, TimeUnit.SECONDS,blockingQueue);
 		ServerSocket theServer = new ServerSocket(port);
 		theServer.setSoTimeout(7000);
 
+		//add this section to test if the priority works - adding a long task at the start of the queue
+//        threadPoolExecutor.execute(()->{
+////            try {
+////                Thread.sleep(10000);
+////            } catch (InterruptedException e) {
+////                e.printStackTrace();
+////            }
+////        });
+
 		while (isRunning()) {
 			try {
-				// System.out.println("Waiting for a client on port: " + port);
 				Socket aClient = theServer.accept();
-				// System.out.println(aClient.getInetAddress() + " Connected");
-				clientHandler.handleClient(aClient.getInputStream(), aClient.getOutputStream());
-				aClient.close();
-				// System.out.println(aClient.getInetAddress()+" Connection closed");
+				threadPoolExecutor.execute((() -> { {
+					try {
+						ClientHandler ch = new PipeGameClientHandler();
+						ch.handleClient(aClient.getInputStream(), aClient.getOutputStream());
+						aClient.close();
 
-				//break; // not threaded server yet
-			} catch (SocketTimeoutException e) {
-				// System.out.println(e.getMessage() + " ~~SocketTimeoutException");
+						//add this section to test if the priority works - so we can tell what task ended first
+//                            try {
+//                                Thread.sleep(3000);
+//                            } catch (InterruptedException e) {
+//                                e.printStackTrace();
+//                            }
+
+					} catch (IOException e) {
+						e.printStackTrace();
+					}}}),null ,aClient.getInputStream().available());
+
 			} catch (IOException e) {
-				// System.out.println(e.getMessage() + " ~~IOException");
+				//e.printStackTrace();
 			}
+
 		}
+
+
 		theServer.close();
-		stopServer();
+		threadPoolExecutor.shutdown();
+		System.exit(0);
 	}
+
 
 	@Override
 	public void runServer(ClientHandler clientHandler) {
 		new Thread(() -> {
 			try {
-				startServer(clientHandler);
+				startServer();
 			} catch (IOException e) {
 				// TODO Auto-generated catch block
 				// e.printStackTrace();
 			}
 		}).start();
-
-		// try {
-		// startServer(clientHandler);
-		// } catch (IOException e) {
-		// // TODO Auto-generated catch block
-		// e.printStackTrace();
-		// }
 	}
+
 
 	@Override
 	public void stopServer() {
@@ -73,5 +95,6 @@ public class MyServer implements Server {
 	public void setRunning(boolean stop) {
 		this.stop = !stop;
 	}
+
 
 }
